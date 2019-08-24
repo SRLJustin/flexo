@@ -44,7 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.MenuAction;
+import net.runelite.api.MenuOpcode;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
@@ -56,11 +56,12 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcDespawned;
+import net.runelite.api.events.ProjectileMoved;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.widgets.WidgetItem;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.flexo.Flexo;
 import net.runelite.client.flexo.FlexoMouse;
@@ -142,6 +143,9 @@ public class ArdyKnightsFlexo extends Plugin
 	private Flexo flexo;
 	private boolean flexoIsRunning = false;
 
+	@Inject
+	private EventBus eventBus;
+
 	@Provides
 	ArdyKnightsFlexoConfig getConfig(ConfigManager configManager)
 	{
@@ -150,6 +154,14 @@ public class ArdyKnightsFlexo extends Plugin
 
 	protected void startUp()
 	{
+		eventBus.subscribe(OverlayMenuClicked.class, this, this::onOverlayMenuClicked);
+		eventBus.subscribe(GameTick.class, this, this::onGameTick);
+		eventBus.subscribe(ChatMessage.class, this, this::onChatMessage);
+		eventBus.subscribe(MenuEntryAdded.class, this, this::onMenuEntryAdded);
+		eventBus.subscribe(MenuOptionClicked.class, this, this::onMenuOptionClicked);
+		eventBus.subscribe(GameStateChanged.class, this, this::onGameStateChanged);
+		eventBus.subscribe(NpcDespawned.class, this, this::onNpcDespawned);
+
 		overlayManager.add(overlay);
 		overlayManager.add(npcOverlay);
 
@@ -168,6 +180,8 @@ public class ArdyKnightsFlexo extends Plugin
 
 	protected void shutDown()
 	{
+		eventBus.unregister(this);
+
 		overlayManager.remove(overlay);
 		overlayManager.remove(npcOverlay);
 		keyManager.unregisterKeyListener(hotkeyListener);
@@ -218,7 +232,6 @@ public class ArdyKnightsFlexo extends Plugin
 		}
 	};
 
-	@Subscribe
 	public void onOverlayMenuClicked(OverlayMenuClicked c)
 	{
 		if (!c.getOverlay().equals(overlay))
@@ -235,7 +248,6 @@ public class ArdyKnightsFlexo extends Plugin
 		}
 	}
 
-	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		if (enabled && isInsideArdySouthBank())
@@ -254,7 +266,6 @@ public class ArdyKnightsFlexo extends Plugin
 		}
 	}
 
-	@Subscribe
 	public void onChatMessage(ChatMessage chatMessageEvent)
 	{
 		ChatMessageType chatMessageType = chatMessageEvent.getType();
@@ -279,7 +290,6 @@ public class ArdyKnightsFlexo extends Plugin
 		}
 	}
 
-	@Subscribe
 	public void onMenuEntryAdded(MenuEntryAdded event)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN || !isInsideArdySouthBank())
@@ -294,7 +304,7 @@ public class ArdyKnightsFlexo extends Plugin
 			MenuEntry[] menuEntries = client.getMenuEntries();
 			int type = event.getType();
 
-			if (type == MenuAction.EXAMINE_NPC.getId() && target.toLowerCase().contains("knight"))
+			if (type == MenuOpcode.EXAMINE_NPC.getId() && target.toLowerCase().contains("knight"))
 			{
 				// Add tag option
 				menuEntries = Arrays.copyOf(menuEntries, menuEntries.length + 1);
@@ -304,7 +314,7 @@ public class ArdyKnightsFlexo extends Plugin
 				tagEntry.setParam0(event.getActionParam0());
 				tagEntry.setParam1(event.getActionParam1());
 				tagEntry.setIdentifier(event.getIdentifier());
-				tagEntry.setType(MenuAction.RUNELITE.getId());
+				tagEntry.setOpcode(MenuOpcode.RUNELITE.getId());
 				client.setMenuEntries(menuEntries);
 			}
 		}
@@ -318,29 +328,28 @@ public class ArdyKnightsFlexo extends Plugin
 				menuEntries[0] = new MenuEntry();
 				menuEntries[0].setOption("Ignore");
 				menuEntries[0].setTarget(event.getTarget());
-				menuEntries[0].setType(MenuAction.CANCEL.getId());
+				menuEntries[0].setOpcode(MenuOpcode.CANCEL.getId());
 
 				client.setMenuEntries(menuEntries);
 			}
 		}
 	}
 
-	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked click)
 	{
-		if (Text.removeTags(click.getMenuOption()).toLowerCase().equals("ignore"))
+		if (Text.removeTags(click.getOption()).toLowerCase().equals("ignore"))
 		{
 			click.consume();
 		}
 
-		if (click.getMenuAction() != MenuAction.RUNELITE
-			|| (!click.getMenuOption().equals(TAG)
-			&& !click.getMenuOption().equals(UNTAG)))
+		if (click.getMenuOpcode() != MenuOpcode.RUNELITE
+			|| (!click.getMenuOpcode().equals(TAG)
+			&& !click.getMenuOpcode().equals(UNTAG)))
 		{
 			return;
 		}
 
-		final int id = click.getId();
+		final int id = click.getOpcode();
 		final boolean removed = npcTags.remove(id);
 		final NPC[] cachedNPCs = client.getCachedNPCs();
 		final NPC npc = cachedNPCs[id];
@@ -364,7 +373,6 @@ public class ArdyKnightsFlexo extends Plugin
 		click.consume();
 	}
 
-	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		if (event.getGameState() == GameState.LOGIN_SCREEN ||
@@ -375,7 +383,6 @@ public class ArdyKnightsFlexo extends Plugin
 		}
 	}
 
-	@Subscribe
 	public void onNpcDespawned(NpcDespawned npcDespawned)
 	{
 		final NPC npc = npcDespawned.getNpc();
